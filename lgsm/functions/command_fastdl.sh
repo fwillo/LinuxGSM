@@ -16,12 +16,15 @@ check.sh
 if [ -z "${webdir}" ]; then
 	webdir="${rootdir}/public_html"
 fi
-fastdldir="${webdir}/fastdl"
+fastdldir="${webdir}/fastdl2"
 addonsdir="${systemdir}/addons"
 # Server lua autorun dir, used to autorun lua on client connect to the server.
 luasvautorundir="${systemdir}/lua/autorun/server"
 luafastdlfile="lgsm_cl_force_fastdl.lua"
 luafastdlfullpath="${luasvautorundir}/${luafastdlfile}"
+
+# printf throws errors if locale is different from english
+LC_NUMERIC="en_US.UTF-8"
 
 # Check if bzip2 is installed.
 if [ ! "$(command -v bzip2 2>/dev/null)" ]; then
@@ -39,18 +42,6 @@ echo -e ""
 echo -e "${commandaction} setup"
 echo -e "================================="
 
-# Prompt for clearing old files if directory was already here.
-if [ -d "${fastdldir}" ]; then
-	fn_print_warning_nl "FastDL directory already exists."
-	echo -e "${fastdldir}"
-	echo -e ""
-	if fn_prompt_yn "Overwrite existing directory?" Y; then
-		fn_script_log_info "Overwrite existing directory: YES"
-	else
-		core_exit.sh
-	fi
-fi
-
 # Garry's Mod Specific.
 if [ "${shortname}" == "gmod" ]; then
 	# Prompt for download enforcer, which is using a .lua addfile resource generator.
@@ -66,17 +57,25 @@ fi
 # Clears any fastdl directory content.
 fn_clear_old_fastdl(){
 	# Clearing old FastDL.
-	if [ -d "${fastdldir}" ]; then
-		echo -en "clearing existing FastDL directory ${fastdldir}..."
-		rm -fR "${fastdldir:?}"
-		exitcode=$?
-		if [ "${exitcode}" != 0 ]; then
-			fn_print_fail_eol_nl
-			fn_script_log_fatal "Clearing existing FastDL directory ${fastdldir}"
-			core_exit.sh
-		else
-			fn_print_ok_eol_nl
-			fn_script_log_pass "Clearing existing FastDL directory ${fastdldir}"
+	if [ -d "${fastdldir}" ]; then	
+		# Prompt for clearing old files if directory was already here.
+		fn_print_warning_nl "FastDL directory already exists."
+		echo -e "${fastdldir}"
+		echo -e ""
+
+		if fn_prompt_yn "Rebuild complete FastDL directory?" N; then
+			fn_script_log_info "Rebuild existing directory: YES"
+
+			rm -fR "${fastdldir:?}"
+			exitcode=$?
+			if [ "${exitcode}" != 0 ]; then
+				fn_print_fail_eol_nl
+				fn_script_log_fatal "Clearing existing FastDL directory ${fastdldir}"
+				core_exit.sh
+			else
+				fn_print_ok_eol_nl
+				fn_script_log_pass "Clearing existing FastDL directory ${fastdldir}"
+			fi
 		fi
 	fi
 }
@@ -147,8 +146,8 @@ fn_fastdl_preview(){
 	if [ -f "${tmpdir}/fastdl_files_to_compress.txt" ]; then
 		rm -f "${tmpdir:?}/fastdl_files_to_compress.txt"
 	fi
-	echo -e "analysing required files"
-	fn_script_log_info "Analysing required files"
+	echo -e "Analysing new files"
+	fn_script_log_info "Analysing new files"
 	# Garry's Mod
 	if [ "${shortname}" == "gmod" ]; then
 		cd "${systemdir}" || exit
@@ -190,11 +189,11 @@ fn_fastdl_preview(){
 					while read -r ext; do
 						((fileswc++))
 						tput rc; tput el
-						echo -e "gathering ${directory} ${allowed_extention} : ${fileswc}..."
+						printf "\r\033[Kgathering %-10s %5s : ha6i... " ${directory} ${allowed_extention} ${fileswc}
 						echo -e "${ext}" >> "${tmpdir}/fastdl_files_to_compress.txt"
 					done < <(find "${systemdir}/${directory}" -type f -iname "${allowed_extention}")
-					tput rc; tput el
-					echo -e "gathering ${directory} ${allowed_extention} : ${fileswc}..."
+					tput rc; tput el	
+					printf "\r\033[Kgathering %-10s %5s : %6i... " ${directory} ${allowed_extention} ${fileswc}
 					if [ ${fileswc} != 0 ]; then
 						fn_print_ok_eol_nl
 					else
@@ -204,6 +203,8 @@ fn_fastdl_preview(){
 			fi
 		done
 	fi
+
+	echo -e "================================="
 	if [ -f "${tmpdir}/fastdl_files_to_compress.txt" ]; then
 		echo -e "calculating total file size..."
 		fn_sleep_time
@@ -237,7 +238,7 @@ fn_fastdl_preview(){
 fn_fastdl_gmod(){
 	cd "${systemdir}" || exit
 	for allowed_extention in "${allowed_extentions_array[@]}"; do
-		fileswc=0
+		fileswc=0in
 		tput sc
 		while read -r fastdlfile; do
 			((fileswc++))
@@ -317,7 +318,7 @@ fn_fastdl_source(){
 			elif [ "${directory}" == "materials" ]; then
 				local allowed_extentions_array=( "*.vtf" "*.vmt" "*.vbf" "*.png" "*.svg" )
 			elif [ "${directory}" == "models" ]; then
-				local allowed_extentions_array=( "*.vtx" "*.vvd" "*.mdl" "*.phy" "*.jpg" "*.png" )
+				local allowed_extentions_array=( "*.vtx" "*.vvd" "*.mdl" "*.phy" "*.jpg" "*.png" "*.vtf" "*.vmt" )
 			elif [ "${directory}" == "particles" ]; then
 				local allowed_extentions_array=( "*.pcf" )
 			elif [ "${directory}" == "sound" ]; then
@@ -325,31 +326,61 @@ fn_fastdl_source(){
 			fi
 			for allowed_extention in "${allowed_extentions_array[@]}"; do
 				fileswc=0
-				tput sc
+				tput sc;
+				printf "\r\033[Kcopying %-10s %5s... " ${directory} ${allowed_extention}
 				while read -r fastdlfile; do
 					((fileswc++))
-					tput rc; tput el
-					echo -e "copying ${directory} ${allowed_extention} : ${fileswc}..."
-					fn_sleep_time
-					# get relative path of file in the dir
+
+					# get relative path of file from ${systemdir}
+					#INPUT: /home/server/serverfiles/csgo/maps/de_dust2.bsp
+					#OUTUT: maps/de_dust2.bsp
 					tmprelfilepath="${fastdlfile#"${systemdir}/"}"
-					copytodir="${tmprelfilepath%/*}"
+
 					# create relative path for fastdl
-					if [ ! -d "${fastdldir}/${copytodir}" ]; then
-						mkdir -p "${fastdldir}/${copytodir}"
+					if [ ! -d "${fastdldir}/${directory}" ]; then
+						mkdir -p "${fastdldir}/${directory}"
 					fi
-					cp "${fastdlfile}" "${fastdldir}/${copytodir}"
+
+					# TODO: Check for file state
+					filechksum=$(sha1sum ${fastdlfile})
+					fastdlfilechksum=$(grep ${tmprelfilepath} ${fastdldir}/checksum.txt 2> /dev/null)
+					exitcode=$?
+					if [ "${exitcode}" != 0 ]; then
+						# CASE: WHEN NO ENTRY AVAILABLE OR checksum.txt NOT EXISITING
+						# DO: APPEND NEW ENTRY AND COPY FILE
+						echo "${filechksum% *} ${tmprelfilepath}" >> ${fastdldir}/checksum.txt
+					else
+						# CASE: WHEN ENTRY IN checksum.txt EXISITING
+						if [ ${filechksum% *} == ${fastdlfilechksum% *} ]; then
+							# CASE: WHEN EQUAL FILE STATE 
+							# DO: NEXT FILE
+							continue
+						else
+							# CASE: WHEN UNEQUAL STATE
+							# DO: REPLACE MD5SUM OF ENTRY
+							sed -i 's/${tmprelfilepath}/${filechksum% *} ${tmprelfilepath}' ${fastdldir}/checksum.txt
+						fi
+					fi
+
+					tput rc; tput el
+					printf "\r\033[Kcopying %-10s %5s : %6i... " ${directory} ${allowed_extention} ${fileswc}
+					#fn_sleep_time
+
+					cp "${fastdlfile}" "${fastdldir}/${directory}"
+
 					exitcode=$?
 					if [ "${exitcode}" != 0 ]; then
 						fn_print_fail_eol_nl
-						fn_script_log_fatal "Copying ${fastdlfile} > ${fastdldir}/${copytodir}"
+						fn_script_log_fatal "Copying ${fastdlfile} > ${fastdldir}/${directory}"
 						core_exit.sh
 					else
-						fn_script_log_pass "Copying ${fastdlfile} > ${fastdldir}/${copytodir}"
+						fn_script_log_pass "Copying ${fastdlfile} > ${fastdldir}/${directory}"
 					fi
 				done < <(find "${systemdir}/${directory}" -type f -iname "${allowed_extention}")
 				if [ ${fileswc} != 0 ]; then
 					fn_print_ok_eol_nl
+				else
+					fn_print_info_eol_nl
 				fi
 			done
 		fi
@@ -418,7 +449,7 @@ fn_fastdl_bzip2(){
 		else
 			fn_script_log_pass "Compressing ${filetocompress}"
 		fi
-	done < <(find  "${fastdldir:?}" \( -type f ! -name "*.bz2" \))
+	done < <(find  "${fastdldir:?}" \( -type f ! -name "*.bz2" ! -name "checksum.txt" \))
 	fn_print_ok_eol_nl
 }
 
