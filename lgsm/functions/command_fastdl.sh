@@ -405,8 +405,8 @@ fn_fastdl_gmod_dl_enforcer(){
 		touch "${luafastdlfullpath}"
 		# Read all filenames and put them into a lua file at the right path.
 		while read -r line; do
-			echo -e "resource.AddFile( \"${line}\" )" >> "${luafastdlfullpath}"
-		done < <(find "${fastdldir:?}" \( -type f ! -name "*.bz2" \) -printf '%P\n')
+			echo -e "resource.AddFile( \"${line%.bz2}\" )" >> "${luafastdlfullpath}"
+		done < <(find "${fastdldir:?}" \( -type f ! -name "checksum.txt" \) -printf '%P\n')
 		exitcode=$?
 		if [ "${exitcode}" != 0 ]; then
 			fn_print_fail_eol_nl
