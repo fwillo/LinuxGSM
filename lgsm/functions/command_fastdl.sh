@@ -141,6 +141,42 @@ fn_human_readable_file_size(){
 		fi
 }
 
+fn_fastdl_preview_newfiles() {
+	#$1: 		directory 
+	#$2: 		allowed_extention
+	#return: 	fileswc
+	
+	# get all files of $1, in case of 1="", escape beginning "./" with sed resulting from find with no given folder
+	fastdl_newfiles=$(find $1 -type f \( -iname "$2" -a ! -iwholename "*/workshop*" \) | sed s+^\./++g)
+
+	# Are there any files? Need to check "-z", otherwise sha1sum reads from stdin infinitely
+	if [ ! -z "${fastdl_newfiles}" ]; then
+		echo "${fastdl_newfiles}" >> ${tmpdir}/fastdl_files.txt
+		fastdl_newfiles=$(sha1sum ${fastdl_newfiles})
+
+		# filter all files of $2 and also placed in $1; if $1="", because of sed in ${fastdl_newfiles}
+		# result will be the same from given ERE in grep
+		fastdl_files_available=$(grep -E "${directory}/.${allowed_extention}" ${fastdldir}/checksum.txt)
+		exitcode=$?
+
+		# Check for files only in ${fastdl_newfiles}
+		if [ "${exitcode}" == 0 ]; then
+			fastdl_newfiles=$(comm -23 <(echo "${fastdl_newfiles}" | sort) <(echo "${fastdl_files_available}" | sort))
+		fi
+	
+		# Are there any files left after comparision?
+		if [ ! -z "${fastdl_newfiles}" ]; then
+			echo -e "${fastdl_newfiles}" >> ${tmpdir}/fastdl_files_to_compress.txt
+			return $(echo -e "${fastdl_newfiles}" | wc -l)
+		else
+			return 0
+		fi
+	else
+		return 0
+	fi
+
+}
+
 # Provides info about the fastdl directory content and prompts for confirmation.
 fn_fastdl_preview(){
 	cd "${systemdir}" || exit
@@ -166,21 +202,21 @@ fn_fastdl_preview(){
 	# Garry's Mod
 	if [ "${shortname}" == "gmod" ]; then
 		allowed_extentions_array=( "*.ain" "*.bsp" "*.mdl" "*.mp3" "*.ogg" "*.otf" "*.pcf" "*.phy" "*.png" \
-			 		   "*.svg" "*.vtf" "*.vmt" "*.vtx" "*.vvd" "*.ttf" "*.wav" )
+					   "*.svg" "*.vtf" "*.vmt" "*.vtx" "*.vvd" "*.ttf" "*.wav" )
 		for allowed_extention in "${allowed_extentions_array[@]}"; do
-			fileswc=0
-			while read -r ext; do
-				((fileswc++))
-				echo -e "gathering ${allowed_extention} : ${fileswc}..."
-				echo -e "${ext}" >> "${tmpdir}/fastdl_files_to_compress.txt"
-			done < <(find . -type f -iname "${allowed_extention}")
+			fn_fastdl_preview_newfiles "" "${allowed_extention}"
+			fileswc=$?
+
+			printf "\r\033[Kgathering %5s : %6i... " "${allowed_extention}" ${fileswc}
 			if [ ${fileswc} != 0 ]; then
 				fn_print_ok_eol_nl
 			else
 				fn_print_info_eol_nl
 			fi
+
 		done
-	# Source engine
+
+	# Source Engine
 	else
 		fastdl_directories_array=( "maps" "materials" "models" "particles" "sound" "resources" )
 		for directory in "${fastdl_directories_array[@]}"; do
@@ -196,27 +232,10 @@ fn_fastdl_preview(){
 				elif [ "${directory}" == "sound" ]; then
 					local allowed_extentions_array=( "*.wav" "*.mp3" "*.ogg" )
 				fi
+
 				for allowed_extention in "${allowed_extentions_array[@]}"; do
-					fileswc=0
-					
-					fastdl_newfiles=$(find ${directory} -type f \( -iname "${allowed_extention}" -a ! -iwholename "*/workshop*" \))
-					if [ ! -z "${fastdl_newfiles}" ]; then
-						echo "${fastdl_newfiles}" >> ${tmpdir}/fastdl_files.txt
-						fastdl_newfiles=$(sha1sum ${fastdl_newfiles})
-						fastdl_files_available=$(grep -E "${directory}/.${allowed_extention}$" \
-									 ${fastdldir}/checksum.txt)
-						exitcode=$?
-						if [ "${exitcode}" == 0 ]; then
-							fastdl_newfiles=$(comm -23 <(echo "${fastdl_newfiles}" | sort) \
-										   <(echo "${fastdl_files_available}" | sort))
-						fi
-					
-						# TODO: Can I somehow avoid the same if-case twice?
-						if [ ! -z "${fastdl_newfiles}" ]; then
-							echo -e "${fastdl_newfiles}" >> ${tmpdir}/fastdl_files_to_compress.txt
-							fileswc=$(echo -e "${fastdl_newfiles}" | wc -l)
-						fi
-					fi
+					fn_fastdl_preview_newfiles "${directory}" "${allowed_extention}"
+					fileswc=$?
 
 					printf "\r\033[Kgathering %-10s %5s : %6i... " ${directory} "${allowed_extention}" ${fileswc}
 					if [ ${fileswc} != 0 ]; then
@@ -224,6 +243,7 @@ fn_fastdl_preview(){
 					else
 						fn_print_info_eol_nl
 					fi
+
 				done
 			fi
 		done
@@ -267,26 +287,6 @@ fn_fastdl_preview(){
 
 # Builds Garry's Mod fastdl directory content.
 fn_fastdl_gmod(){
-	cd "${systemdir}" || exit
-	for allowed_extention in "${allowed_extentions_array[@]}"; do
-		fileswc=0
-		while read -r fastdlfile; do
-			((fileswc++))
-			echo -e "copying ${allowed_extention} : ${fileswc}..."
-			cp --parents "${fastdlfile}" "${fastdldir}"
-			exitcode=$?
-			if [ "${exitcode}" != 0 ]; then
-				fn_print_fail_eol_nl
-				fn_script_log_fatal "Copying ${fastdlfile} > ${fastdldir}"
-				core_exit.sh
-			else
-				fn_script_log_pass "Copying ${fastdlfile} > ${fastdldir}"
-			fi
-		done < <(find . -type f -iname "${allowed_extention}")
-		if [ ${fileswc} != 0 ]; then
-			fn_print_ok_eol_nl
-		fi
-	done
 	# Correct addons directory structure for FastDL.
 	if [ -d "${fastdldir}/addons" ]; then
 		echo -en "updating addons file structure..."
@@ -314,6 +314,7 @@ fn_fastdl_gmod(){
 			fn_script_log_pass "Clearing addons dir from fastdl dir"
 		fi
 	fi
+
 	# Correct content that may be into a lua directory by mistake like some darkrpmodification addons.
 	if [ -d "${fastdldir}/lua" ]; then
 		echo -en "correcting DarkRP files..."
@@ -329,39 +330,40 @@ fn_fastdl_gmod(){
 			fn_script_log_pass "Correcting DarkRP files"
 		fi
 	fi
+
 	if [ -f "${tmpdir}/fastdl_files_to_compress.txt" ]; then
 		totalfiles=$(wc -l < "${tmpdir}/fastdl_files_to_compress.txt")
 		# Calculates total file size.
 		while read -r dufile; do
-			filesize=$(du -b "${dufile}" | awk '{ print $1 }')
+			filesize=$(du -b "${dufile#*  }" | awk '{ print $1 }')
 			filesizetotal=$((filesizetotal + filesize))
 		done <"${tmpdir}/fastdl_files_to_compress.txt"
 	fi
 }
 
-fn_fastdl_source() {	
+
+# Builds the fastdl directory content.
+fn_fastdl_build(){
+	# Copy all needed files for FastDL.
+	echo -e "\n================================="
+	echo -e "copying files to ${fastdldir}"
+	fn_script_log_info "Copying files to ${fastdldir}"
+
 	sumfileswc=$(wc -l < ${tmpdir}/fastdl_files_to_compress.txt)
 	fileswc=0	
 	while read -r fastdlfile; do 
 		((fileswc++))
 
 		relfilepath=${fastdlfile#*  }
-		directory=${relfilepath%/*}
-		
-		# create relative path for fastdl
-		if [ ! -d "${fastdldir}/${directory}" ]; then
-			mkdir -p "${fastdldir}/${directory}"
-		fi
-
 		printf "\r\033[Kcopying %6i/%-6i: %s... " ${fileswc} ${sumfileswc} ${relfilepath}
-		cp "${relfilepath}" "${fastdldir}/${directory}"
+		cp --parents "${relfilepath}" "${fastdldir}"
 		exitcode=$?
 		if [ "${exitcode}" != 0 ]; then
 			fn_print_fail_eol_nl
-			fn_script_log_fatal "Copying ${relfilepath} > ${fastdldir}/${directory}"
+			fn_script_log_fatal "Copying ${relfilepath} > ${fastdldir}"
 			core_exit.sh
 		else
-			fn_script_log_pass "Copying ${relfilepath} > ${fastdldir}/${directory}"
+			fn_script_log_pass "Copying ${relfilepath} > ${fastdldir}"
 		fi
 
 		grep "${relfilepath}" ${fastdldir}/checksum.txt &> /dev/null
@@ -374,19 +376,10 @@ fn_fastdl_source() {
 
 	done < ${tmpdir}/fastdl_files_to_compress.txt
 	fn_print_ok_eol_nl
-}
 
-# Builds the fastdl directory content.
-fn_fastdl_build(){
-	# Copy all needed files for FastDL.
-	echo -e "\n================================="
-	echo -e "copying files to ${fastdldir}"
-	fn_script_log_info "Copying files to ${fastdldir}"
 	if [ "${shortname}" == "gmod" ]; then
 		fn_fastdl_gmod
 		fn_fastdl_gmod_dl_enforcer
-	else
-		fn_fastdl_source
 	fi
 }
 
