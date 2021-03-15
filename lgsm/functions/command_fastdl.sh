@@ -16,7 +16,7 @@ check.sh
 if [ -z "${webdir}" ]; then
 	webdir="${rootdir}/public_html"
 fi
-fastdldir="${webdir}/fastdl2"
+fastdldir="${webdir}/fastdl"
 addonsdir="${systemdir}/addons"
 # Server lua autorun dir, used to autorun lua on client connect to the server.
 luasvautorundir="${systemdir}/lua/autorun/server"
